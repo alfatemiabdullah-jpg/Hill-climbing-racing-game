@@ -1,0 +1,517 @@
+<div style="display:flex; flex-direction:column; align-items:center; gap:0; user-select:none;">
+  <h2 class="sr-only">A hill climb racing style driving game with a garage of six vehicles to buy using coins. Press the gas and brake buttons or arrow keys to drive across rolling hills, collecting coins and fuel cans while avoiding flipping over or running out of fuel.</h2>
+
+  <div style="display:flex; justify-content:space-between; width:100%; max-width:640px; margin-bottom:8px; gap:8px;">
+    <button id="shopBtn" style="display:flex; align-items:center; gap:6px; font-size:12px; padding:6px 12px;">
+      <i class="ti ti-car" style="font-size:14px;" aria-hidden="true"></i>
+      <span>garage</span>
+    </button>
+    <button id="dayNightBtn" style="display:flex; align-items:center; gap:6px; font-size:12px; padding:6px 12px;">
+      <i class="ti ti-sun" id="dnIcon" style="font-size:14px;" aria-hidden="true"></i>
+      <span id="dnLabel">day</span>
+    </button>
+  </div>
+
+  <div id="shopPanel" style="display:none; width:100%; max-width:640px; background:#14121c; border-radius:16px; padding:1.25rem 1rem; margin-bottom:10px;">
+    <div style="text-align:center; margin-bottom:6px;">
+      <span style="font-size:16px; font-weight:500; color:#f4b400;">garage</span>
+    </div>
+    <div style="display:flex; justify-content:center; margin-bottom:14px;">
+      <div style="display:flex; align-items:center; gap:6px; background:#221f2c; border-radius:20px; padding:5px 14px;">
+        <div style="width:14px; height:14px; border-radius:50%; background:#f4b400;"></div>
+        <span id="shopCoins" style="font-size:13px; color:#e8ddc8; font-weight:500;">0</span>
+      </div>
+    </div>
+    <div id="bikeList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:10px;"></div>
+  </div>
+
+  <div style="position:relative; width:100%; max-width:640px; border-radius:12px; overflow:hidden; border:0.5px solid var(--border);">
+    <canvas id="game" width="640" height="360" style="width:100%; display:block; touch-action:none;"></canvas>
+    <button id="restartBtn" aria-label="Restart" style="position:absolute; top:10px; right:10px; width:34px; height:34px; border-radius:50%; background:rgba(255,255,255,0.85); border:1px solid rgba(0,0,0,0.15); display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;">
+      <i class="ti ti-refresh" style="font-size:18px; color:#333;" aria-hidden="true"></i>
+    </button>
+  </div>
+
+  <div style="display:flex; justify-content:space-between; align-items:center; width:100%; max-width:640px; margin-top:10px;">
+    <button id="brakeBtn" style="width:84px; height:64px; border-radius:12px; background:#3a3530; border:2px solid #232019; color:#e8ddc8; font-size:12px; font-weight:500; letter-spacing:0.03em; cursor:pointer;">brake</button>
+    <div style="font-size:13px; color:var(--text-muted); text-align:center;">↑ / ↓ or buttons<br/>← → to balance in air</div>
+    <button id="gasBtn" style="width:84px; height:64px; border-radius:12px; background:#3a3530; border:2px solid #232019; color:#e8ddc8; font-size:12px; font-weight:500; letter-spacing:0.03em; cursor:pointer;">gas</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = 640, H = 360;
+  const restartBtn = document.getElementById('restartBtn');
+  const gasBtn = document.getElementById('gasBtn');
+  const brakeBtn = document.getElementById('brakeBtn');
+  const dayNightBtn = document.getElementById('dayNightBtn');
+  const dnIcon = document.getElementById('dnIcon');
+  const dnLabel = document.getElementById('dnLabel');
+  const shopBtn = document.getElementById('shopBtn');
+  const shopPanel = document.getElementById('shopPanel');
+  const shopCoinsEl = document.getElementById('shopCoins');
+  const bikeList = document.getElementById('bikeList');
+
+  const VEHICLES = [
+    {id:'jeep', name:'jeep', price:0, color:'#d64545', dark:'#8a1f1f', icon:'ti-car', speed:2, power:2, desc:'default jeep'},
+    {id:'bike', name:'dirt bike', price:15, color:'#3778c2', dark:'#1f4d80', icon:'ti-motorbike', speed:5, power:1, maxMul:1.35, accMul:1.2, desc:'fastest, easy to flip'},
+    {id:'sports', name:'sports car', price:80, color:'#7a3ca8', dark:'#4a2266', icon:'ti-car-suv', speed:4, power:3, maxMul:1.3, accMul:1.15, desc:'speed demon'},
+    {id:'monster', name:'monster truck', price:50, color:'#5a5a5a', dark:'#2c2c2c', icon:'ti-truck', speed:2, power:4, maxMul:0.9, accMul:1.35, desc:'heavy but powerful'},
+    {id:'truck', name:'big rig', price:65, color:'#3f7d3f', dark:'#234d23', icon:'ti-truck-delivery', speed:1, power:5, maxMul:0.75, accMul:1.4, desc:'slow, unstoppable climber'},
+    {id:'buggy', name:'sand buggy', price:35, color:'#e08a1f', dark:'#8a530f', icon:'ti-steering-wheel', speed:3, power:3, maxMul:1.1, accMul:1.2, desc:'balanced all-rounder'}
+  ];
+  let owned = {jeep:true};
+  let selectedVehicle = VEHICLES[0];
+  let totalCoins = 0;
+
+  function statBars(n){
+    let s = '';
+    for(let i=0;i<5;i++){
+      s += '<div style="width:12px; height:5px; border-radius:2px; background:'+(i<n?'#f4b400':'#3a3745')+';"></div>';
+    }
+    return '<div style="display:flex; gap:3px;">'+s+'</div>';
+  }
+
+  function renderShop(){
+    shopCoinsEl.textContent = totalCoins;
+    bikeList.innerHTML = '';
+    VEHICLES.forEach(v=>{
+      const card = document.createElement('div');
+      const isSel = selectedVehicle.id===v.id;
+      card.style.cssText = 'background:#1c1926; border-radius:12px; padding:12px; display:flex; flex-direction:column; align-items:center; gap:8px; border:2px solid '+(isSel?'#4fb0e8':'transparent')+';';
+
+      const iconWrap = document.createElement('div');
+      iconWrap.style.cssText = 'width:100%; height:54px; display:flex; align-items:center; justify-content:center;';
+      iconWrap.innerHTML = '<i class="ti '+v.icon+'" style="font-size:34px; color:'+v.color+';" aria-hidden="true"></i>';
+      card.appendChild(iconWrap);
+
+      const name = document.createElement('span');
+      name.style.cssText = 'font-size:13px; font-weight:500; color:#e8ddc8;';
+      name.textContent = v.name;
+      card.appendChild(name);
+
+      const desc = document.createElement('span');
+      desc.style.cssText = 'font-size:11px; color:#9a95a8; text-align:center;';
+      desc.textContent = owned[v.id] ? v.desc : v.price+' coins';
+      card.appendChild(desc);
+
+      const stats = document.createElement('div');
+      stats.style.cssText = 'display:flex; flex-direction:column; gap:3px; align-items:flex-start;';
+      stats.innerHTML = statBars(v.speed) + statBars(v.power);
+      card.appendChild(stats);
+
+      const btn = document.createElement('button');
+      btn.style.cssText = 'width:100%; font-size:12px; padding:6px 0; border-radius:8px; border:none; cursor:pointer; margin-top:2px;';
+      if(owned[v.id]){
+        btn.textContent = isSel ? 'selected' : 'select';
+        btn.style.background = isSel ? '#3fae6a' : '#2e2b3a';
+        btn.style.color = isSel ? '#0d2e1a' : '#e8ddc8';
+        btn.disabled = isSel;
+        btn.onclick = ()=>{ selectedVehicle = v; renderShop(); };
+      } else {
+        btn.textContent = 'buy '+v.price;
+        btn.style.background = totalCoins>=v.price ? '#f4b400' : '#3a3745';
+        btn.style.color = totalCoins>=v.price ? '#3a2600' : '#7a7688';
+        btn.onclick = ()=>{
+          if(totalCoins >= v.price){
+            totalCoins -= v.price;
+            owned[v.id] = true;
+            selectedVehicle = v;
+            renderShop();
+          }
+        };
+      }
+      card.appendChild(btn);
+      bikeList.appendChild(card);
+    });
+  }
+  renderShop();
+
+  shopBtn.addEventListener('click', ()=>{
+    shopPanel.style.display = shopPanel.style.display==='none' ? 'block' : 'none';
+    renderShop();
+  });
+
+  let isNight = false;
+  dayNightBtn.addEventListener('click', ()=>{
+    isNight = !isNight;
+    dnIcon.className = isNight ? 'ti ti-moon' : 'ti ti-sun';
+    dnLabel.textContent = isNight ? 'night' : 'day';
+  });
+
+  let seed = Math.random() * 1000;
+  function noise(x){
+    return Math.sin(x*0.004+seed)*22 + Math.sin(x*0.009+seed*1.7)*10;
+  }
+  function terrainY(x){ return 245 + noise(x); }
+
+  const GRAV = 0.55;
+  const WHEEL_R = 15;
+  const WHEEL_BASE = 58;
+  const BASE_MAX_SPEED = 11;
+
+  let coins, fuelCans, state, keys, displaySpeed = 0;
+  function makeCoins(fromX){
+    const arr = [];
+    for(let i=0;i<40;i++){
+      const cx = fromX + 250 + i*95 + Math.sin(i)*20;
+      arr.push({x:cx, y: terrainY(cx) - 34, taken:false, value: (i%4===0)?5:1});
+    }
+    return arr;
+  }
+  function makeFuelCans(fromX){
+    const arr = [];
+    for(let i=0;i<8;i++){
+      const cx = fromX + 500 + i*480;
+      arr.push({x:cx, y: terrainY(cx) - 20, taken:false});
+    }
+    return arr;
+  }
+
+  function reset(){
+    seed = Math.random()*1000;
+    const startAngle = Math.atan2(terrainY(98)-terrainY(82), 16);
+    state = {
+      x: 90, vx: 0, bodyY: terrainY(90)-16, vy: 0, angle: startAngle, angVel: 0,
+      fuel: 100, dist: 0, coinsGot: 0, camX: 0,
+      crashed: false, airTime: 0, throttle: 0
+    };
+    keys = {up:false, down:false, left:false, right:false};
+    coins = makeCoins(90);
+    fuelCans = makeFuelCans(90);
+    displaySpeed = 0;
+  }
+  reset();
+
+  function setKey(k,v){ keys[k]=v; }
+  window.addEventListener('keydown', e=>{
+    if(e.key==='ArrowUp') setKey('up',true);
+    if(e.key==='ArrowDown') setKey('down',true);
+    if(e.key==='ArrowLeft') setKey('left',true);
+    if(e.key==='ArrowRight') setKey('right',true);
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+  });
+  window.addEventListener('keyup', e=>{
+    if(e.key==='ArrowUp') setKey('up',false);
+    if(e.key==='ArrowDown') setKey('down',false);
+    if(e.key==='ArrowLeft') setKey('left',false);
+    if(e.key==='ArrowRight') setKey('right',false);
+  });
+  function bindHold(el, key){
+    const on = ev=>{ ev.preventDefault(); setKey(key,true); };
+    const off = ev=>{ ev.preventDefault(); setKey(key,false); };
+    el.addEventListener('mousedown', on); el.addEventListener('mouseup', off); el.addEventListener('mouseleave', off);
+    el.addEventListener('touchstart', on, {passive:false}); el.addEventListener('touchend', off); el.addEventListener('touchcancel', off);
+  }
+  bindHold(gasBtn, 'up');
+  bindHold(brakeBtn, 'down');
+  restartBtn.addEventListener('click', reset);
+
+  function getWheelPositions(){
+    const dx = Math.cos(state.angle) * (WHEEL_BASE/2);
+    const dy = Math.sin(state.angle) * (WHEEL_BASE/2);
+    return { rear: {x: state.x - dx, y: state.bodyY - dy}, front: {x: state.x + dx, y: state.bodyY + dy} };
+  }
+
+  function update(){
+    if(state.crashed) return;
+    const accMul = selectedVehicle.accMul || 1;
+    const maxMul = selectedVehicle.maxMul || 1;
+    const maxSpeed = BASE_MAX_SPEED * maxMul;
+
+    if(state.fuel > 0){
+      state.throttle = keys.up ? Math.min(1, state.throttle+0.05) : Math.max(0, state.throttle-0.1);
+    } else state.throttle = 0;
+
+    const groundAngle = Math.atan2(terrainY(state.x+10)-terrainY(state.x-10), 20);
+    const w = getWheelPositions();
+    const grounded = (w.rear.y >= terrainY(w.rear.x)-WHEEL_R-2) || (w.front.y >= terrainY(w.front.x)-WHEEL_R-2);
+
+    if(grounded){
+      state.airTime = 0;
+      state.vx += Math.cos(groundAngle) * state.throttle * 0.5 * accMul;
+      if(keys.down) state.vx *= 0.92;
+      state.vx *= 0.997;
+      state.vx = Math.max(-2.5, Math.min(maxSpeed, state.vx));
+      state.angle = groundAngle;
+      state.angVel = 0;
+      const targetBodyY = terrainY(state.x) - 16;
+      state.bodyY += (targetBodyY - state.bodyY) * 0.4;
+      state.vy = 0;
+    } else {
+      state.airTime++;
+      state.vy += GRAV;
+      if(keys.left) state.angVel -= 0.012;
+      if(keys.right) state.angVel += 0.012;
+      state.angVel *= 0.98;
+      state.angle += state.angVel;
+    }
+
+    state.bodyY += state.vy;
+    state.x += state.vx;
+    state.dist = Math.max(state.dist, Math.floor((state.x-90)/8));
+    displaySpeed += (Math.max(0,state.vx) - displaySpeed) * 0.15;
+
+    if(state.throttle>0.05 && state.fuel>0){ state.fuel = Math.max(0, state.fuel-0.06); }
+
+    coins.forEach(c=>{
+      if(!c.taken && Math.abs(c.x-state.x)<22 && Math.abs(c.y-state.bodyY)<26){
+        c.taken = true; state.coinsGot += c.value; totalCoins += c.value;
+      }
+    });
+    if(coins[coins.length-1].x - state.x < 400){ coins = coins.concat(makeCoins(coins[coins.length-1].x)); }
+
+    fuelCans.forEach(f=>{
+      if(!f.taken && Math.abs(f.x-state.x)<24 && Math.abs(f.y-state.bodyY)<28){
+        f.taken = true; state.fuel = Math.min(100, state.fuel+18);
+      }
+    });
+    if(fuelCans[fuelCans.length-1].x - state.x < 700){ fuelCans = fuelCans.concat(makeFuelCans(fuelCans[fuelCans.length-1].x)); }
+
+    const normalized = ((state.angle % (Math.PI*2)) + Math.PI*3) % (Math.PI*2) - Math.PI;
+    if(Math.abs(normalized) > 1.75 && state.airTime>3) state.crashed = true;
+    if(state.fuel<=0 && Math.abs(state.vx)<0.05 && state.airTime===0) state.crashed = true;
+
+    state.camX = state.x - 160;
+  }
+
+  function drawBackground(){
+    ctx.fillStyle = isNight ? '#0d1b2e' : '#7ec8e3';
+    ctx.fillRect(0,0,W,H);
+    if(isNight){
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      for(let i=0;i<14;i++){
+        const sx = (i*80 - state.camX*0.1);
+        const wx = ((sx % (W+40)) + (W+40)) % (W+40) - 20;
+        ctx.beginPath();
+        ctx.arc(wx, (i*41)%140+10, 1.3, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(W-90, 60, 22, 0, Math.PI*2);
+      ctx.fillStyle = '#e8e6d9';
+      ctx.fill();
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      const cx = ((0 - state.camX*0.15) % (W+200) + W+200) % (W+200) - 100;
+      ctx.beginPath();
+      ctx.ellipse(cx, 55, 34,16,0,0,Math.PI*2);
+      ctx.ellipse(cx+28, 50, 26,14,0,0,Math.PI*2);
+      ctx.ellipse(cx-26, 52, 24,13,0,0,Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  function drawTerrain(){
+    ctx.save();
+    ctx.translate(-state.camX,0);
+    ctx.beginPath();
+    ctx.moveTo(state.camX-20,H);
+    for(let sx=-20; sx<=W+20; sx+=8){
+      const wx = state.camX+sx;
+      ctx.lineTo(wx, terrainY(wx));
+    }
+    ctx.lineTo(state.camX+W+20,H);
+    ctx.closePath();
+    ctx.fillStyle = isNight ? '#3a2c1e' : '#8b5e34';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(state.camX-20, terrainY(state.camX-20));
+    for(let sx=-20; sx<=W+20; sx+=8){
+      const wx = state.camX+sx;
+      ctx.lineTo(wx, terrainY(wx));
+    }
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = isNight ? '#2c4a24' : '#5a9c3f';
+    ctx.stroke();
+
+    coins.forEach(c=>{
+      if(c.taken) return;
+      if(c.x < state.camX-30 || c.x > state.camX+W+30) return;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.value===5?11:8, 0, Math.PI*2);
+      ctx.fillStyle = '#f4b400';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#c98a00';
+      ctx.stroke();
+    });
+
+    fuelCans.forEach(f=>{
+      if(f.taken) return;
+      if(f.x < state.camX-30 || f.x > state.camX+W+30) return;
+      ctx.fillStyle = '#d64545';
+      ctx.fillRect(f.x-8, f.y-14, 16, 20);
+      ctx.fillStyle = '#8a1f1f';
+      ctx.fillRect(f.x-4, f.y-19, 8, 6);
+      ctx.strokeStyle = '#5a1414';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(f.x-8, f.y-14, 16, 20);
+    });
+    ctx.restore();
+  }
+
+  function drawVehicle(){
+    ctx.save();
+    ctx.translate(-state.camX,0);
+    const w = getWheelPositions();
+
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.fillStyle = '#2b2b2b';
+    ctx.lineWidth = 2;
+    [w.rear,w.front].forEach(pos=>{
+      ctx.beginPath(); ctx.arc(pos.x,pos.y,WHEEL_R,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#555';
+      for(let a=0;a<6;a++){
+        const ang = a*(Math.PI/3) + state.x*0.15;
+        ctx.beginPath();
+        ctx.moveTo(pos.x,pos.y);
+        ctx.lineTo(pos.x+Math.cos(ang)*WHEEL_R, pos.y+Math.sin(ang)*WHEEL_R);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = '#1a1a1a';
+    });
+
+    ctx.save();
+    ctx.translate(state.x, state.bodyY);
+    ctx.rotate(state.angle);
+    ctx.fillStyle = state.crashed ? '#a33' : selectedVehicle.color;
+    ctx.beginPath();
+    ctx.moveTo(-WHEEL_BASE/2-6, 8);
+    ctx.lineTo(-WHEEL_BASE/2-6, -8);
+    ctx.lineTo(-10, -8);
+    ctx.lineTo(-2, -26);
+    ctx.lineTo(18, -26);
+    ctx.lineTo(24, -8);
+    ctx.lineTo(WHEEL_BASE/2+6, -8);
+    ctx.lineTo(WHEEL_BASE/2+6, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = state.crashed ? '#600' : selectedVehicle.dark;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#cfe8f5';
+    ctx.beginPath();
+    ctx.moveTo(-4,-24); ctx.lineTo(4,-24); ctx.lineTo(8,-10); ctx.lineTo(-8,-10);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#f0c090';
+    ctx.beginPath();
+    ctx.arc(0,-30,7,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#5a3a2a';
+    ctx.beginPath();
+    ctx.arc(0,-33,6,Math.PI,0);
+    ctx.fill();
+
+    ctx.restore();
+
+    if(isNight){
+      ctx.save();
+      ctx.translate(state.x, state.bodyY);
+      ctx.rotate(state.angle);
+      ctx.beginPath();
+      ctx.moveTo(WHEEL_BASE/2+6,-4);
+      ctx.lineTo(WHEEL_BASE/2+50,-14);
+      ctx.lineTo(WHEEL_BASE/2+50,6);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,240,180,0.18)';
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  function drawSpeedometer(){
+    const cx = W-56, cy = H-56, r = 34;
+    const maxSpeed = BASE_MAX_SPEED * (selectedVehicle.maxMul||1);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.fillStyle = 'rgba(20,20,20,0.55)';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#e8ddc8';
+    ctx.stroke();
+
+    const startA = Math.PI*0.75, endA = Math.PI*2.25;
+    ctx.beginPath();
+    ctx.arc(cx,cy,r-7,startA,endA);
+    ctx.strokeStyle = 'rgba(232,221,200,0.35)';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    const speedFrac = Math.max(0,Math.min(1,displaySpeed/maxSpeed));
+    const needleA = startA + speedFrac*(endA-startA);
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+Math.cos(needleA)*(r-10), cy+Math.sin(needleA)*(r-10));
+    ctx.strokeStyle = '#e2453f';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx,cy,3,0,Math.PI*2);
+    ctx.fillStyle = '#e8ddc8';
+    ctx.fill();
+
+    ctx.fillStyle = '#e8ddc8';
+    ctx.font = '500 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.round(displaySpeed*12) + ' km/h', cx, cy+r+14);
+    ctx.restore();
+  }
+
+  function drawHud(){
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0,0,W,34);
+
+    ctx.fillStyle = '#e8ddc8';
+    ctx.font = '500 15px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(state.dist + ' m', 14, 23);
+
+    ctx.textAlign = 'right';
+    ctx.beginPath();
+    ctx.arc(W-90,17,8,0,Math.PI*2);
+    ctx.fillStyle = '#f4b400';
+    ctx.fill();
+    ctx.fillStyle = '#e8ddc8';
+    ctx.fillText(totalCoins+'', W-16, 23);
+
+    const barX = 200, barW = 140;
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillRect(barX,12,barW,10);
+    ctx.fillStyle = state.fuel<20 ? '#e24b4a' : '#7fce6c';
+    ctx.fillRect(barX,12,barW*(state.fuel/100),10);
+
+    drawSpeedometer();
+
+    if(state.crashed){
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0,H/2-40,W,80);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.font = '500 20px sans-serif';
+      ctx.fillText(state.fuel<=0 && Math.abs(state.vx)<0.05 ? 'out of fuel' : 'crashed', W/2, H/2-6);
+      ctx.font = '400 14px sans-serif';
+      ctx.fillText('tap restart to try again', W/2, H/2+18);
+    }
+  }
+
+  function loop(){
+    update();
+    drawBackground();
+    drawTerrain();
+    drawVehicle();
+    drawHud();
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
+</script>
